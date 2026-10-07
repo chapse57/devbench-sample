@@ -1,0 +1,2 @@
+# Windows에서 받아도 셸 스크립트가 LF로 유지되게 (CRLF면 컨테이너 안 bash가 깨짐)
+* text=auto eol=lf
