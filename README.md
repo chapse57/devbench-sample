@@ -75,6 +75,38 @@ tests/test_outputs.py   pytest 채점기 15개
 - 프로세스가 트랜잭션 중간에 죽는 경우(SIGKILL)의 원자성 검사
 - WAL 모드와 읽기 프로세스가 섞인 경우의 일관된 diff
 
+## Docker 실측 결과 (2026-10-07, Windows + Docker Desktop)
+
+아래 실행 방법의 명령을 그대로 돌린 출력입니다. 전체 로그는 [`docs/run-original.log`](docs/run-original.log), [`docs/run-oracle.log`](docs/run-oracle.log)에 있습니다.
+
+**원본 코드 → reward 0**
+
+```
+FAILED ..test_same_second_runs_get_distinct_ids_and_keep_their_own_data
+FAILED ..test_concurrent_processes_never_collide_or_mix[0]
+FAILED ..test_concurrent_processes_never_collide_or_mix[1]
+FAILED ..test_concurrent_processes_never_collide_or_mix[2]
+FAILED ..test_concurrent_processes_never_collide_or_mix[3]
+FAILED ..test_concurrent_processes_never_collide_or_mix[4]
+FAILED ..test_diff_uses_recording_order_when_clock_is_identical[0]
+FAILED ..test_diff_uses_recording_order_when_clock_is_identical[1]
+FAILED ..test_diff_uses_recording_order_when_clock_is_identical[2]
+FAILED ..test_diff_uses_recording_order_when_clock_is_identical[3]
+FAILED ..test_clock_going_backwards_does_not_change_what_latest_means
+FAILED ..test_legacy_db_is_preserved_and_new_runs_come_after_it
+FAILED ..test_legacy_db_survives_concurrent_first_open
+13 failed, 2 passed in 5.06s
+0
+```
+
+**참조 풀이 적용 → reward 1**
+
+```
+...............                                                          [100%]
+15 passed in 11.52s
+1
+```
+
 ## 실행 방법
 
 Windows + Docker Desktop에서 아래 명령으로 실제 이미지를 빌드해 확인했습니다 (2026-10-07). 원본은 13 failed → reward 0, 참조 풀이 적용 후 15 passed → reward 1. 우회 8종과 모델 보정은 컨테이너와 같은 경로(`/app`, `/tests`, `/logs/verifier`)를 재현한 환경에서 돌렸습니다.
