@@ -3,7 +3,7 @@
 > A task that measures whether an AI coding agent, given instructions in Korean, can fix a production bug where **"two runs in the same second silently overwrite each other's data."**
 > Author: Jinnu Kim · 2026-10-07 · 한국어: [README.ko.md](README.ko.md)
 
-The agent's instructions (`instruction.md`) are in Korean on purpose: the task was built for a Korean-language coding benchmark. Everything else (code, tests, logs) is language-neutral.
+The agent's instructions (`instruction.md`), code comments and test failure messages are in Korean on purpose: the task was built for a Korean-language coding benchmark. This README explains everything in English.
 
 ## At a glance
 
