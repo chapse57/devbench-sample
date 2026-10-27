@@ -1,85 +1,87 @@
-# run-id-same-second-collision — 샘플 과제 (Harbor 형식)
+# run-id-same-second-collision — sample task (Harbor format)
 
-> 한국어 지시를 받은 AI 코딩 에이전트가 **"같은 초에 두 번 실행되면 데이터가 조용히 덮어써지는"** 운영 장애를 고칠 수 있는지 측정하는 과제입니다.
-> 작성: 진우 (에테르) · 2026-10-07
+> A task that measures whether an AI coding agent, given instructions in Korean, can fix a production bug where **"two runs in the same second silently overwrite each other's data."**
+> Author: Jinnu Kim · 2026-10-07 · 한국어: [README.ko.md](README.ko.md)
 
-## 한눈에 보기
+The agent's instructions (`instruction.md`) are in Korean on purpose: the task was built for a Korean-language coding benchmark. Everything else (code, tests, logs) is language-neutral.
 
-| 항목 | 내용 |
+## At a glance
+
+| Item | Details |
 |---|---|
-| 범주 | 데이터 정합성 / 경쟁 상태 / 스키마 마이그레이션 |
-| 난이도 | 중간 (보정 결과 아래 참고) |
-| 환경 | `python:3.12-slim`, 표준 라이브러리 + SQLite, 단일 컨테이너 |
-| 채점 | pytest 15개 → `/logs/verifier/reward.txt` (1/0) |
-| 검증 | 원본 0점, 참조 풀이 1점(6회 반복 모두 통과), 우회 풀이 7종과 원본 모두 0점, Docker 이미지 실측 확인 |
+| Category | Data integrity / race conditions / schema migration |
+| Difficulty | Medium (see calibration below) |
+| Environment | `python:3.12-slim`, standard library + SQLite, single container |
+| Grading | 15 pytest tests → `/logs/verifier/reward.txt` (1/0) |
+| Verification | Original code scores 0, reference solution scores 1 (passed in all 6 repeated runs), 7 workaround solutions and the original all score 0, checked on the real Docker image |
 
-## 이 과제가 어디서 왔나
+## Where the task comes from
 
-제 개인 프로젝트(x-metrics-pipeline, 2026-09)에서 실제로 고친 버그가 바탕입니다. 실행 ID를 **초 단위 시각**으로 만들었기 때문에, 같은 초에 실행이 두 번 생기면 ID가 겹쳤습니다.
+It is based on a bug I actually fixed in my own project (x-metrics-pipeline, 2026-09). Run IDs were built from a **timestamp in seconds**, so two runs in the same second got the same ID.
 
-과제에서는 이 버그에 세 가지 상황을 덧붙여 "한 줄 고치면 끝나는 문제"가 아니게 만들었습니다. 재시도, 백업 서버 cron에 의한 동시 실행, NTP 시계 역행이며, 모두 **과제용 설정**입니다.
+The task adds three situations on top of that bug so it is not a one-line fix: retries, concurrent runs from a cron job on a backup server, and the clock going backwards after an NTP correction. All three are **settings made up for the task**.
 
-## 폴더 구조
+## Folder layout
 
 ```
-instruction.md          에이전트에게 주는 한국어 지시문
-task.toml               메타데이터·타임아웃·자원 (Harbor schema 1.3)
-environment/Dockerfile  python:3.12-slim + /app 코드 (테스트는 이미지에 넣지 않음)
-environment/app/        버그가 있는 metricsd (collect / runs / show / diff CLI)
-solution/solve.sh       참조 풀이
-tests/test.sh           채점 진입점 (reward.txt 작성)
-tests/test_outputs.py   pytest 채점기 15개
+instruction.md          Instructions given to the agent (in Korean)
+task.toml               Metadata, timeouts, resources (Harbor schema 1.3)
+environment/Dockerfile  python:3.12-slim + the /app code (tests are not baked into the image)
+environment/app/        metricsd with the bug (collect / runs / show / diff CLI)
+solution/solve.sh       Reference solution
+tests/test.sh           Grading entry point (writes reward.txt)
+tests/test_outputs.py   The 15 pytest tests
 ```
 
-## 풀이가 만족해야 하는 세 가지 (= 테스트 묶음)
+## The three things a solution must satisfy (= the test groups)
 
-1. **고유성.** 같은 초 연속 실행과 12개 프로세스 동시 실행(5회 반복)에서 run_id가 겹치지 않아야 합니다. 각 실행의 측정값이 섞이지도 않아야 합니다.
-2. **기록 순서.** "최신"은 시각이 아니라 기록된 순서로 정합니다. 같은 시각으로 3회 실행(4회 반복)한 경우와, 시계가 4초 뒤로 간 경우를 확인합니다.
-3. **기존 DB 보존.** 구 스키마 DB를 데이터 손실 없이 이어 써야 합니다. 이 DB에는 **백업에서 나중에 복원된 가장 오래된 실행**이 들어 있어서, 삽입 순서와 run_id 순서가 다릅니다. 여러 프로세스가 동시에 처음 여는 경우(마이그레이션 경합)도 포함합니다.
+1. **Uniqueness.** run_ids must never collide, both for back-to-back runs in the same second and for 12 processes running at once (repeated 5 times). The measurements of different runs must not get mixed either.
+2. **Recording order.** "Latest" is decided by the order runs were recorded, not by the clock. Checked with 3 runs at the same timestamp (repeated 4 times) and with the clock moving 4 seconds backwards.
+3. **Existing database preserved.** A database in the old schema must keep working with no data loss. It contains **the oldest run, restored later from a backup**, so insertion order differs from run_id order. This includes several processes opening it for the first time at once (a migration race).
 
-추가로, 시계를 조작해서 고유성을 만드는 우회를 막는 제약 테스트가 있습니다. `started_at`은 시계 값 그대로여야 하고, run_id는 시작 시각으로 시작해야 합니다.
+On top of that, a constraint test blocks workarounds that fake uniqueness by changing the clock: `started_at` must be the clock value as-is, and the run_id must start with the start time.
 
-## 우회 차단 검증 (실제로 돌린 결과)
+## Workaround check (results from actual runs)
 
-정답처럼 보이지만 틀린 우회 풀이 7가지를 만들어 원본과 함께 채점했습니다. 전부 0점입니다.
+I wrote 7 solutions that look right but are wrong, and graded them together with the original. All of them score 0.
 
-| 우회 시도 | 결과 | 잡아낸 테스트 |
+| Attempt | Result | Caught by |
 |---|---|---|
-| 원본 그대로 | 0점 (13개 실패) | 거의 전부 |
-| collect 전에 1초 쉬기 | 0점 | 가짜 시계라 효과 없음 → 고유성 전부 |
-| run_id에 랜덤 꼬리표만 붙이기 | 0점 | 기록 순서, 시계 역행, 기존 DB |
-| 랜덤 꼬리표 + 시작 시각(동률이면 rowid)으로 정렬 | 0점 | 시계 역행, 기존 DB |
-| "같은 초 실행 수 세서 +1" (잠금 없음) | 0점 | 동시 실행(경쟁 상태), 시계 역행, 기존 DB |
-| 겹치면 시각을 1초씩 밀기 | 0점 | 제약(시작 시각 접두어), 동시 실행 |
-| 구 스키마를 만나면 테이블을 새로 만들기 | 0점 | 기존 DB 보존 2개 |
-| 랜덤 꼬리표 + 암묵적 rowid로 정렬 | 0점 | 기존 DB 보존 2개 (backfill로 삽입 순서 ≠ run_id 순서) |
-| **참조 풀이** | **1점** (6회 반복 모두 15/15) | — |
+| Original code as-is | 0 (13 failures) | Almost all tests |
+| Sleep 1 second before collect | 0 | No effect with a fake clock → all uniqueness tests |
+| Append a random suffix to run_id only | 0 | Recording order, clock going backwards, existing DB |
+| Random suffix + sort by start time (rowid on ties) | 0 | Clock going backwards, existing DB |
+| "Count runs in the same second and add 1" (no lock) | 0 | Concurrent runs (race), clock going backwards, existing DB |
+| On collision, push the timestamp forward 1 second | 0 | Constraint (start-time prefix), concurrent runs |
+| Recreate the table when the old schema is found | 0 | Both existing-DB preservation tests |
+| Random suffix + sort by implicit rowid | 0 | Both existing-DB preservation tests (backfill makes insertion order ≠ run_id order) |
+| **Reference solution** | **1** (15/15 in all 6 repeated runs) | — |
 
-마지막 rowid 풀이는 처음 테스트에서는 통과했습니다. 그래서 지시문에 이미 있는 요구("기존 실행끼리는 run_id 순서")를 실제로 검사하도록 backfill 케이스를 추가했습니다. 지시문을 바꾼 게 아니라, **지시문에 적힌 요구를 테스트가 빠뜨리고 있던 구멍**을 메운 것입니다.
+The last rowid solution passed the first version of the tests. So I added a backfill case to actually check a requirement that was already in the instructions ("existing runs stay in run_id order"). The instructions did not change; this closed **a gap where the tests were missing a requirement the instructions already stated**.
 
-## 난이도 보정 — AI 모델에게 실제로 풀게 한 결과
+## Difficulty calibration — results from real AI models
 
-지시문만 주고(테스트 비공개) 모델별로 2회씩 풀게 한 뒤 같은 채점기로 채점했습니다.
+Each model got only the instructions (tests hidden), solved the task twice, and was graded with the same grader.
 
-| 모델 | 결과 | 실패 원인 |
+| Model | Result | Why it failed |
 |---|---|---|
-| Claude Haiku 4.5 | **0 / 2** | 1회차: "같은 초 개수 +1" 방식이라 동시 실행에서 UNIQUE 충돌로 crash. 마이그레이션도 run_id 순서가 아닌 삽입 순서로 복사 |
-| | | 2회차: 암묵적 rowid로 순서를 판단 → backfill된 기존 실행 순서가 틀림 |
-| Claude Sonnet 5.5 | **2 / 2** | 둘 다 쓰기 잠금(BEGIN IMMEDIATE) 안에서 순번을 발급하고, 기존 실행을 run_id 순으로 마이그레이션 |
+| Claude Haiku 4.5 | **0 / 2** | Run 1: used "count same-second runs + 1", so concurrent runs crashed on a UNIQUE conflict. The migration also copied rows in insertion order instead of run_id order |
+| | | Run 2: decided order by the implicit rowid → wrong order for the backfilled existing run |
+| Claude Sonnet 5.5 | **2 / 2** | Both runs issued sequence numbers inside a write lock (BEGIN IMMEDIATE) and migrated existing runs in run_id order |
 
-**해석:** 지시문이 모호하지 않다는 근거는 상위 모델이 지시문만 보고 2/2 통과했다는 점입니다. 테스트가 성질(경쟁 상태, 순서 의미, 데이터 보존)을 구분해 낸다는 근거는 하위 모델이 정확히 그 세 지점에서 떨어졌다는 점입니다.
+**Reading:** The stronger model passing 2/2 from the instructions alone is the evidence that the instructions are not ambiguous. The weaker model failing at exactly the three points the tests target (race conditions, meaning of order, data preservation) is the evidence that the tests tell those properties apart.
 
-다만 상위 모델 기준으로는 "쉬움~중간"입니다. 난이도를 올리려면 아래 변형을 검토할 수 있습니다.
+For a strong model, though, this is "easy to medium." Variations that could raise the difficulty:
 
-- **재시도 멱등성.** 첫 collect가 커밋 후 비정상 종료하면 재시도가 같은 내용의 실행을 하나 더 만듭니다. 그러면 diff가 "변화 없음"을 내는데, 이건 원래 장애와 같은 증상입니다. Sonnet 1회차가 스스로 "남은 위험"으로 지적한 지점이라, 다음 단계 과제 소재로 적합합니다.
-- 프로세스가 트랜잭션 중간에 죽는 경우(SIGKILL)의 원자성 검사
-- WAL 모드와 읽기 프로세스가 섞인 경우의 일관된 diff
+- **Retry idempotency.** If the first collect crashes after committing, the retry creates another run with the same content. diff then reports "no change", which is the same symptom as the original incident. Sonnet flagged this itself as a "remaining risk" in its first run, so it is a good basis for a next-level task.
+- Atomicity when a process is killed mid-transaction (SIGKILL)
+- A consistent diff when WAL mode and reader processes are mixed
 
-## Docker 실측 결과 (2026-10-07, Windows + Docker Desktop)
+## Docker results (2026-10-07, Windows + Docker Desktop)
 
-아래 실행 방법의 명령을 그대로 돌린 출력입니다. 전체 로그는 [`docs/run-original.log`](docs/run-original.log), [`docs/run-oracle.log`](docs/run-oracle.log)에 있습니다.
+Output from running the commands in "How to run" below as-is. Full logs are in [`docs/run-original.log`](docs/run-original.log) and [`docs/run-oracle.log`](docs/run-oracle.log).
 
-**원본 코드 → reward 0**
+**Original code → reward 0**
 
 ```
 FAILED ..test_same_second_runs_get_distinct_ids_and_keep_their_own_data
@@ -99,7 +101,7 @@ FAILED ..test_legacy_db_survives_concurrent_first_open
 0
 ```
 
-**참조 풀이 적용 → reward 1**
+**With the reference solution → reward 1**
 
 ```
 ...............                                                          [100%]
@@ -107,27 +109,26 @@ FAILED ..test_legacy_db_survives_concurrent_first_open
 1
 ```
 
-## 실행 방법
+## How to run
 
-Windows + Docker Desktop에서 아래 명령으로 실제 이미지를 빌드해 확인했습니다 (2026-10-07). 원본은 13 failed → reward 0, 참조 풀이 적용 후 15 passed → reward 1. 우회 풀이 7종과 모델 보정은 컨테이너와 같은 경로(`/app`, `/tests`, `/logs/verifier`)를 재현한 환경에서 돌렸습니다.
+I built the real image and checked it with the commands below on Windows + Docker Desktop (2026-10-07): the original gives 13 failed → reward 0, and with the reference solution 15 passed → reward 1. The 7 workaround solutions and the model calibration were run in an environment that reproduces the container's paths (`/app`, `/tests`, `/logs/verifier`).
 
 ```bash
-# 과제 폴더에서 실행
+# Run from the task folder
 docker build -t kdb-run-id environment
 
-# 원본 → 0이 나와야 함
+# Original → should print 0
 docker run --rm -v "$PWD/tests:/tests" kdb-run-id bash -c "bash /tests/test.sh; cat /logs/verifier/reward.txt"
 
-# 참조 풀이 적용 → 1이 나와야 함
+# With the reference solution → should print 1
 docker run --rm -v "$PWD/tests:/tests" -v "$PWD/solution:/solution" kdb-run-id \
   bash -c "bash /solution/solve.sh && bash /tests/test.sh; cat /logs/verifier/reward.txt"
 ```
 
-Windows Git Bash에서는 경로가 바뀌지 않도록 명령 앞에 `MSYS_NO_PATHCONV=1` 을 붙이거나 PowerShell(`${PWD}`)에서 실행하세요.
+In Windows Git Bash, prefix the commands with `MSYS_NO_PATHCONV=1` so the paths are not rewritten, or run them from PowerShell (`${PWD}`).
 
-## 작성 메모
+## Notes
 
-- AI 도구(Claude)를 적극 활용해 만들었습니다. 소재는 제 프로젝트(x-metrics-pipeline)에서 실제로 났던 같은 초 run_id 충돌이고, 과제 설계·구현·우회 풀이 검증·모델 보정은 Claude와 함께 진행했습니다. Windows + Docker Desktop에서의 이미지 빌드와 채점 실측은 제가 직접 돌렸습니다.
-
-- `tests/test.sh`는 `set -e`를 쓰지 않습니다. Harbor 문서 예시처럼 `set -e` 상태에서 `$?`로 분기하면, pytest가 실패하는 순간 스크립트가 끝나 reward 파일이 아예 쓰이지 않습니다.
-- 채점은 CLI 출력만 봅니다. DB에 직접 손대는 건 "구 스키마 DB"를 재현할 때뿐입니다. 그래서 테이블 이름이나 컬럼 구조가 달라도 요구사항을 지키면 통과합니다. 실제로 Sonnet 2회차는 별도 `run_order` 테이블로 풀었는데도 통과했습니다.
+- I built this with heavy use of an AI tool (Claude). The source is the same-second run_id collision that actually happened in my project (x-metrics-pipeline); the task design, implementation, workaround checks and model calibration were done together with Claude. I ran the image build and the grading on Windows + Docker Desktop myself.
+- `tests/test.sh` does not use `set -e`. If you branch on `$?` under `set -e`, as in the Harbor docs example, the script exits the moment pytest fails and the reward file is never written.
+- Grading looks only at CLI output. The tests touch the database directly only to recreate the "old-schema DB". So a solution passes with different table names or columns as long as it meets the requirements. In fact, Sonnet's second run solved it with a separate `run_order` table and still passed.
